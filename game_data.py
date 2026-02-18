@@ -8,8 +8,9 @@ import streamlit as st
 
 from config import CUSTOM_API_BASE, GameData
 
-
+# This makes sure that the data we get is what we expect.
 def validate_game_data(data: Any) -> GameData:
+    # Anything inside triple quotations is just an explaination to the LLM what the function should be doing.
     """
     Strictly validate that data matches the expected schema:
 
@@ -26,6 +27,7 @@ def validate_game_data(data: Any) -> GameData:
         ]
     }
     """
+    # This is just making sure we're generating everything properly. if not, it'll will break things and sends out an error.
     if not isinstance(data, dict):
         raise ValueError("Game data must be a JSON object.")
 
@@ -62,6 +64,7 @@ def generate_game_data() -> GameData:
     Call an LLM via LiteLLM to generate game data, returning a strictly validated JSON object.
     Uses environment variables for API keys (handled by LiteLLM).
     """
+    # This essentially just tells the API how to behave when generating the jeopardy board.
     system_prompt = (
         "You are generating Jeopardy-style questions for an introductory astronomy class. "
         "Every time you are called, you MUST vary the specific wording of clues and, when reasonable, "
@@ -83,7 +86,7 @@ def generate_game_data() -> GameData:
         "pretend you are sampling from a large bank of possible clues."
     )
 
-    # Use the same pattern as in Class-9-Exercise: OSU LiteLLM proxy + ASTRO1221_API_KEY
+    # This calls the API key from the .env file without exposing it to the entire world. If the key isn't there, it will let us know.
     astro1221_key = os.getenv("ASTRO1221_API_KEY")
     if not astro1221_key:
         raise ValueError(
@@ -91,7 +94,7 @@ def generate_game_data() -> GameData:
             "Make sure your `.env` file (same folder as this script) defines ASTRO1221_API_KEY."
         )
 
-    # Add a random run ID to discourage proxy-side caching and encourage variety.
+    # Add a random run ID to discourage proxy-side caching and encourage variety. Sadly I don't think this actually works
     run_id = random.randint(0, 1_000_000_000)
 
     resp = litellm.completion(
@@ -102,13 +105,13 @@ def generate_game_data() -> GameData:
                 "role": "user",
                 "content": (
                     "Generate the game board JSON now. "
-                    f"Use different wording and examples than previous runs. run_id={run_id}"
+                    f"Use different wording and examples than previous runs. run_id={run_id}" # The idea of the run ID was so that it would generate random catagories and questions but i dont think it works
                 ),
             },
         ],
         api_base=CUSTOM_API_BASE,
         api_key=astro1221_key,
-        temperature=0.7,
+        temperature=0.7, # I dont think that changing this value affects much because of the system prompt.
         response_format={"type": "json_object"},
     )
 
@@ -122,7 +125,7 @@ def generate_game_data() -> GameData:
     except Exception as exc:  # noqa: BLE001
         raise ValueError(f"Failed to parse JSON from LLM: {exc}") from exc
 
-    # Record token usage (if provided) so we can inspect it in the UI.
+    # Displays the amount of tokens used when generating the game board
     usage = None
     if isinstance(resp, dict):
         usage = resp.get("usage")

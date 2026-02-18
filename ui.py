@@ -78,15 +78,16 @@ def render_current_clue() -> None:
         options,
         key="answer_radio",
     )
-
+    # Defines the 3 buttons you can choose from when you have the question show up.
     cols = st.columns(3)
     with cols[0]:
-        submitted = st.button("Submit answer")
+        submitted = st.button("Submit answer") #This as you would expect submits your answer
     with cols[1]:
-        give_up = st.button("Show answer / Skip")
+        give_up = st.button("Show answer / Skip") # This will show you the answer, wait 2 seconds, then go back to the main board. Plan on changing this to "Hint" which will turn this into mutliple choice question
     with cols[2]:
-        close = st.button("Close")
+        close = st.button("Close") # This will close the question and not give you any points. We should change this to "Give Up"
 
+    # This is the logic for the submit button when clicked
     if submitted:
         user_answer = selected_option
         correct_answer = current["answer"]
@@ -108,6 +109,7 @@ def render_current_clue() -> None:
         time.sleep(2)
         st.rerun()
 
+    # This is the logic for the give up button
     elif give_up:
         correct_answer = current["answer"]
         st.info(f"The correct answer was: {correct_answer}")
@@ -116,5 +118,7 @@ def render_current_clue() -> None:
         time.sleep(2)
         st.rerun()
 
+        
+    # This is the logic for the close button.
     elif close:
         st.session_state.current_clue = None

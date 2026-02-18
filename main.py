@@ -9,8 +9,7 @@ from ui import render_board, render_current_clue
 
 
 def main() -> None:
-    # Load environment variables from a .env file (if present),
-    # so ASTRO1221_API_KEY is available for the OSU LiteLLM proxy.
+    #This loads the .env file so you can get the API key without leaking it to github.
     load_dotenv()
 
     if not os.getenv("ASTRO1221_API_KEY"):
@@ -22,12 +21,13 @@ def main() -> None:
     st.title("Astronomy Jeopardy")
     init_session_state()
 
+    # This generates the main starting page and the loading page. It also generates the sidebar that shows tokens and cash amount you have.
     st.sidebar.header("Game Controls")
     if st.sidebar.button("New Game"):
         with st.spinner("Generating a new astronomy Jeopardy board..."):
             try:
                 st.session_state.game_board = generate_game_data()
-                st.session_state.answered_questions = set()  # type: ignore[assignment]
+                st.session_state.answered_questions = set()
                 st.session_state.score = 0
                 st.session_state.current_clue = None
             except Exception as exc:  # noqa: BLE001

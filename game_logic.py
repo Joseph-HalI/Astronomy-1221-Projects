@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 
 import streamlit as st
 
-
+# This saves your progress so that why you can actually play the jeopardy game.
 def init_session_state() -> None:
     if "game_board" not in st.session_state:
         st.session_state.game_board = None
@@ -19,17 +19,17 @@ def init_session_state() -> None:
     if "last_token_usage" not in st.session_state:
         st.session_state.last_token_usage = None
 
-
+# Marks a question as answered by adding it into the answered questions session state
 def mark_answered(cat_idx: int, clue_idx: int) -> None:
-    st.session_state.answered_questions.add((cat_idx, clue_idx))  # type: ignore[union-attr]
+    st.session_state.answered_questions.add((cat_idx, clue_idx))
 
-
+# This displays which questions you have answered so you can't try to answer repeat questions
 def is_answered(cat_idx: int, clue_idx: int) -> bool:
-    return (cat_idx, clue_idx) in st.session_state.answered_questions  # type: ignore[union-attr]
+    return (cat_idx, clue_idx) in st.session_state.answered_questions
 
 
 def set_current_clue(cat_idx: int, clue_idx: int) -> None:
-    categories: List[Dict[str, Any]] = st.session_state.game_board["categories"]  # type: ignore[index]
+    categories: List[Dict[str, Any]] = st.session_state.game_board["categories"]
     clue = categories[cat_idx]["clues"][clue_idx]
 
     # Build multiple-choice options: correct answer + up to 3 random answers
@@ -89,7 +89,7 @@ def _normalize_answer(text: str) -> str:
     t = t.strip(" .!?\"'")
     return t
 
-
+# as the name suggests, when this function is called, it checks if the answer is correct.
 def check_answer(user_answer: str, correct_answer: str) -> bool:
     user = _normalize_answer(user_answer)
     correct = _normalize_answer(correct_answer)
