@@ -9,7 +9,7 @@ from ui import render_board, render_current_clue
 
 
 def main() -> None:
-    #This loads the .env file so you can get the API key without leaking it to github.
+    # This loads the .env file so you can get the API key without leaking it to github.
     load_dotenv()
 
     if not os.getenv("ASTRO1221_API_KEY"):
@@ -21,7 +21,6 @@ def main() -> None:
     st.title("Astronomy Jeopardy")
     init_session_state()
 
-    # This generates the main starting page and the loading page. It also generates the sidebar that shows tokens and cash amount you have.
     st.sidebar.header("Game Controls")
     if st.sidebar.button("New Game"):
         with st.spinner("Generating a new astronomy Jeopardy board..."):
@@ -30,12 +29,11 @@ def main() -> None:
                 st.session_state.answered_questions = set()
                 st.session_state.score = 0
                 st.session_state.current_clue = None
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 st.error(f"Failed to generate game data: {exc}")
 
     st.sidebar.markdown(f"**Score:** ${st.session_state.score}")
 
-    # Show token usage info if available
     usage = st.session_state.last_token_usage
     if usage:
         prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
@@ -54,12 +52,11 @@ def main() -> None:
         st.info("Click **New Game** in the sidebar to generate an astronomy Jeopardy board.")
         return
 
-    # Always render the board so buttons remain clickable,
-    # then, if a clue is active, render the question view as well.
-    # This avoids the need to click twice to open a question.
-    render_board()
+    # Show EITHER the clue view OR the board — never both at once
     if st.session_state.current_clue is not None:
         render_current_clue()
+    else:
+        render_board()
 
 
 if __name__ == "__main__":

@@ -6,11 +6,9 @@ import streamlit as st
 from game_logic import check_answer, is_answered, mark_answered, set_current_clue
 
 
-def render_board() -> None:
-    categories: List[Dict[str, Any]] = st.session_state.game_board["categories"]  # type: ignore[index]
-
-    st.html(
-    """
+def inject_global_styles() -> None:
+    """Global styles applied to every view so the theme is consistent."""
+    st.html("""
     <style>
     .stApp {
         background-color: #071277 !important;
@@ -18,26 +16,36 @@ def render_board() -> None:
     [data-testid="stSidebar"] {
         background-color: #030043 !important;
     }
+    [data-testid="stMarkdownContainer"] p strong {
+        text-transform: uppercase !important;
+    }
+    </style>
+    """)
+
+
+def render_board() -> None:
+    categories: List[Dict[str, Any]] = st.session_state.game_board["categories"]  # type: ignore[index]
+
+    inject_global_styles()
+
+    st.html("""
+    <style>
     [data-testid="stBaseButton-secondary"] {
         background-color: #071277 !important;
         color: #d69f4c !important;
         border: 2px solid #000000 !important;
         font-weight: 900 !important;
+        border-radius: 8px !important;
         height: auto !important;
         min-height: 60px !important;
-        width: auto !important;
-        min-width: 100px
-        white-space: normal !important; 
-    }
-    [data-testid="stMarkdownContainer"] p strong {
-    text-transform: uppercase !important;
+        width: 100px !important;
+        white-space: normal !important;
     }
     [data-testid="stBaseButton-secondary"] p {
-    font-size: 1.5rem !important;
+        font-size: 1.5rem !important;
     }
     </style>
-    """
-)
+    """)
 
     num_categories = len(categories)
     num_clues = max(len(cat["clues"]) for cat in categories)
@@ -60,11 +68,11 @@ def render_board() -> None:
                     key = f"btn-{cat_idx}-{clue_idx}"
                     disabled = is_answered(cat_idx, clue_idx)
                     label = f"${value}" if not disabled else "—"
-                    # Wrap button so we can style via CSS
                     with st.container():
                         st.markdown('<div class="jeopardy-button">', unsafe_allow_html=True)
                         if st.button(label, key=key, disabled=disabled):
                             set_current_clue(cat_idx, clue_idx)
+                            st.rerun()
                         st.markdown("</div>", unsafe_allow_html=True)
                 else:
                     st.write("")
@@ -75,30 +83,60 @@ def render_current_clue() -> None:
     if not current:
         return
 
-    # Full-page style view: hide the board and show just the question + options.
+    inject_global_styles()
+
+    # Clue-view button styles — natural sizing and rounded corners
+    st.html("""
+    <style>
+    [data-testid="stBaseButton-secondary"] {
+        background-color: #071277 !important;
+        color: #d69f4c !important;
+        border: 2px solid #000000 !important;
+        font-weight: 900 !important;
+        width: auto !important;
+        min-height: 40px !important;
+        height: auto !important;
+        white-space: nowrap !important;
+        border-radius: 8px !important;
+    }
+    [data-testid="stBaseButton-secondary"] p {
+        font-size: 1rem !important;
+    }
+    .main .block-container {
+        max-width: 100% !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+    }
+    </style>
+    """)
+
     st.header("Astronomy Jeopardy Question")
     st.markdown(f"**Category:** {current['category_name']}")
     st.markdown(f"**Value:** ${current['value']}")
     st.write(current["clue"])
 
-    options: List[str] = current.get("options", [current["answer"]])
-    selected_option = st.radio(
-        "Choose your answer:",
-        options,
-        key="answer_radio",
-    )
-    # Defines the 3 buttons you can choose from when you have the question show up.
+    # --- Answer input: free-response by default, multiple choice after hint ---
+    show_hints: bool = st.session_state.get("show_hints", False)
+
+    if not show_hints:
+        user_answer = st.text_input("Your answer:", key="answer_input")
+    else:
+        st.caption("💡 Hint: choose an option below.")
+        options: List[str] = current.get("options", [current["answer"]])
+        user_answer = st.radio("Choose your answer:", options, key="answer_radio")
+
+    # --- Action buttons ---
     cols = st.columns(3)
     with cols[0]:
-        submitted = st.button("Submit answer") #This as you would expect submits your answer
+        submitted = st.button("Submit answer")
     with cols[1]:
-        give_up = st.button("Show answer") # This will show you the answer, wait 2 seconds, then go back to the main board. Plan on changing this to "Hint" which will turn this into mutliple choice question
+        hint = st.button("💡 Hint", disabled=show_hints)
     with cols[2]:
-        close = st.button("Close") # This will close the question and not give you any points. We should change this to "Give Up"
+        give_up = st.button("Give Up")
 
-    # This is the logic for the submit button when clicked
+    # --- Button logic ---
+
     if submitted:
-        user_answer = selected_option
         correct_answer = current["answer"]
         cat_idx = current["category_index"]
         clue_idx = current["clue_index"]
@@ -113,21 +151,19 @@ def render_current_clue() -> None:
 
         mark_answered(cat_idx, clue_idx)
         st.session_state.current_clue = None
-        # Pause briefly so the player can see the feedback,
-        # then automatically close the question view.
+        st.session_state.show_hints = False
         time.sleep(2)
         st.rerun()
 
-    # This is the logic for the give up button
+    elif hint:
+        st.session_state.show_hints = True
+        st.rerun()
+
     elif give_up:
         correct_answer = current["answer"]
         st.info(f"The correct answer was: {correct_answer}")
         mark_answered(current["category_index"], current["clue_index"])
         st.session_state.current_clue = None
+        st.session_state.show_hints = False
         time.sleep(2)
         st.rerun()
-
-        
-    # This is the logic for the close button.
-    elif close:
-        st.session_state.current_clue = None
