@@ -7,6 +7,7 @@ import litellm
 import streamlit as st
 
 from config import CUSTOM_API_BASE, GameData
+from rag_lectures import search_chunks
 
 # This makes sure that the data we get is what we expect.
 def validate_game_data(data: Any) -> GameData:
@@ -59,6 +60,146 @@ def validate_game_data(data: Any) -> GameData:
     return {"categories": categories}
 
 
+def generate_lectures_category() -> Dict[str, Any]:
+    """
+    Generate a "Lectures" category using RAG to retrieve relevant content from lecture notes.
+    Returns a category dictionary with 5 clues based on lecture content.
+    """
+    astro1221_key = os.getenv("ASTRO1221_API_KEY")
+    if not astro1221_key:
+        raise ValueError(
+            "ASTRO1221_API_KEY is not set. "
+            "Make sure your `.env` file (same folder as this script) defines ASTRO1221_API_KEY."
+        )
+
+    # Using a variety of topics to ensure diverse clues
+    astronomy_topics = [
+    "variables and data collections",
+    "control flow and file operations",
+    "numerical computing",
+    "functions and object oriented programming",
+    "data visualization",
+    "LLM API basics and parameters",
+    "LLM function tools and RAG retrieval augmented generation",
+    "GitHub and version control",
+    "Streamlit app deployment",
+    "Pandas data analysis",
+]
+    
+    # Retrieve relevant chunks for each topic
+    all_chunks = []
+    for topic in astronomy_topics:
+        results = search_chunks(topic, top_k=1)
+        # Only include chunks with reasonable similarity
+        if results and results[0]['similarity'] >= 0.2:
+            all_chunks.append(results[0]['chunk']['text'])
+    
+    # If we didn't find enough content, try some fallback queries
+    if len(all_chunks) < 3:
+        fallback_topics = ["astronomy", "coding", "LLM","data science"]
+        for topic in fallback_topics:
+            if len(all_chunks) >= 5:
+                break
+            results = search_chunks(topic, top_k=1)
+            if results and results[0]['similarity'] >= 0.2:
+                chunk_text = results[0]['chunk']['text']
+                # Avoid duplicates
+                if chunk_text not in all_chunks:
+                    all_chunks.append(chunk_text)
+    
+    # Combine chunks into context (limit total length)
+    context_parts = []
+    total_length = 0
+    max_context_length = 3000  # Limit context to avoid token limits
+    
+    for chunk in all_chunks[:5]:  # Use up to 5 chunks
+        chunk_text = chunk[:800]  # Limit each chunk to 800 chars
+        # Try to end at a complete sentence
+        last_sentence_end = max(
+            chunk_text.rfind('.'),
+            chunk_text.rfind('?'),
+            chunk_text.rfind('!')
+        )
+        if last_sentence_end > 0:
+            chunk_text = chunk_text[:last_sentence_end + 1]
+        
+        if total_length + len(chunk_text) > max_context_length:
+            break
+        context_parts.append(chunk_text)
+        total_length += len(chunk_text)
+    
+    context = "\n\n---\n\n".join(context_parts)
+    
+    # If no context found, use a generic prompt
+    if not context:
+        context = "General astronomy topics from the course lectures."
+    
+    # Generate clues using LLM with retrieved lecture content
+    system_prompt = (
+        "You are generating Jeopardy-style questions based on course lecture materials. "
+        "Create questions that test understanding of the specific content from the lectures. "
+        "Return ONLY a JSON object with this structure:\n"
+        '{\"clues\": [\n'
+        '  {\"value\": 200, \"clue\": \"text\", \"answer\": \"text\"},\n'
+        '  {\"value\": 400, \"clue\": \"text\", \"answer\": \"text\"},\n'
+        '  {\"value\": 600, \"clue\": \"text\", \"answer\": \"text\"},\n'
+        '  {\"value\": 800, \"clue\": \"text\", \"answer\": \"text\"},\n'
+        '  {\"value\": 1000, \"clue\": \"text\", \"answer\": \"text\"}\n'
+        ']}\n\n'
+        "Requirements:\n"
+        "- Generate exactly 5 clues with values 200, 400, 600, 800, 1000.\n"
+        "- Base clues on the provided lecture content.\n"
+        "- Use increasing difficulty: 200=easiest, 1000=hardest.\n"
+        "- Do NOT include any explanation outside the JSON.\n"
+        "- Ensure answers are specific facts from the lecture materials."
+    )
+    
+    user_prompt = f"""Generate 5 Jeopardy-style clues based on the following course lecture materials:
+
+LECTURE MATERIALS:
+{context}
+
+Create clues that test knowledge of the specific concepts, facts, and terminology from these lectures."""
+
+    resp = litellm.completion(
+        model="openai/GPT-4.1-mini",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        api_base=CUSTOM_API_BASE,
+        api_key=astro1221_key,
+        temperature=0.7,
+        response_format={"type": "json_object"},
+    )
+    
+    raw_content = resp.choices[0].message["content"]  # type: ignore[index]
+    if isinstance(raw_content, list):
+        raw_content = "".join(part.get("text", "") for part in raw_content if isinstance(part, dict))
+    
+    try:
+        clues_data = json.loads(raw_content)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"Failed to parse JSON from LLM for Lectures category: {exc}") from exc
+    
+    # Validate and structure the response
+    clues = clues_data.get("clues", [])
+    if not isinstance(clues, list) or len(clues) != 5:
+        raise ValueError(f"Expected 5 clues, got {len(clues) if isinstance(clues, list) else 'non-list'}")
+    
+    # Ensure values are correct
+    expected_values = [200, 400, 600, 800, 1000]
+    for i, clue in enumerate(clues):
+        if not isinstance(clue, dict):
+            raise ValueError(f"Clue {i} is not a dictionary")
+        clue["value"] = expected_values[i]
+    
+    return {
+        "name": "Lectures",
+        "clues": clues
+    }
+
+
 def generate_game_data() -> GameData:
     """
     Call an LLM via LiteLLM to generate game data, returning a strictly validated JSON object.
@@ -77,10 +218,12 @@ def generate_game_data() -> GameData:
         "  ]}\n"
         "]}\n\n"
         "Requirements (must follow these exactly):\n"
-        "- 5 categories.\n"
+        "- 4 categories.\n"
         "- Each category must have 5 clues.\n"
         "- Use increasing values: 200, 400, 600, 800, 1000.\n"
+        "- Within each category, difficulty must increase with value: 200=easiest (recall), 400=moderate, 600=application, 800=harder, 1000=hardest (synthesis or obscure facts).\n"
         "- All content must be about astronomy.\n"
+        "- Do NOT use categories like 'Solar System Basics', 'Solar System', 'Planets', or other basic solar system topics.\n"
         "- Do NOT include any explanation outside the JSON.\n"
         "- Do NOT reuse exactly the same text or exact same set of clues across different calls; "
         "pretend you are sampling from a large bank of possible clues."
@@ -105,7 +248,9 @@ def generate_game_data() -> GameData:
                 "role": "user",
                 "content": (
                     "Generate the game board JSON now. "
-                    f"Use different wording and examples than previous runs. run_id={run_id}" # The idea of the run ID was so that it would generate random catagories and questions but i dont think it works
+                    "In each category, make the 200 clue easiest and the 1000 clue hardest. "
+                    "Avoid categories about basic solar system topics (like 'Solar System Basics' or 'Planets'). "
+                    f"Use different wording and examples than previous runs. run_id={run_id}"
                 ),
             },
         ],
@@ -135,6 +280,8 @@ def generate_game_data() -> GameData:
             system_prompt
             + " "
             + "Generate the game board JSON now. "
+            + "In each category, make the 200 clue easiest and the 1000 clue hardest. "
+            + "Avoid categories about basic solar system topics (like 'Solar System Basics' or 'Planets'). "
             + f"Use different wording and examples than previous runs. run_id={run_id}"
         )
         approx_prompt_tokens = max(1, len(prompt_text) // 4)
@@ -148,4 +295,14 @@ def generate_game_data() -> GameData:
 
     st.session_state.last_token_usage = usage
 
-    return validate_game_data(data)
+    # Validate the 4 LLM-generated categories
+    llm_data = validate_game_data(data)
+    
+    # Generate the 5th category using RAG
+    lectures_category = generate_lectures_category()
+    
+    # Combine the 4 LLM categories with the 1 RAG category
+    combined_categories = llm_data["categories"] + [lectures_category]
+    
+    # Validate the combined result
+    return validate_game_data({"categories": combined_categories})
