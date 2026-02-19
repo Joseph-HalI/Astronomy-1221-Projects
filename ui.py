@@ -9,26 +9,35 @@ from game_logic import check_answer, is_answered, mark_answered, set_current_clu
 def render_board() -> None:
     categories: List[Dict[str, Any]] = st.session_state.game_board["categories"]  # type: ignore[index]
 
-    #st.subheader("Astronomy Jeopardy")
-    st.markdown(
-        """
-        <style>
-        .jeopardy-button button[kind="secondary"] {
-            background-color: #1e3a8a !important; /* deep blue */
-            color: #facc15 !important;            /* gold */
-            border-radius: 6px !important;
-            border: 1px solid #facc15 !important;
-            font-weight: 700 !important;
-        }
-        .jeopardy-button button[kind="secondary"]:disabled {
-            background-color: #111827 !important;
-            color: #6b7280 !important;
-            border-color: #374151 !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.html(
+    """
+    <style>
+    .stApp {
+        background-color: #071277 !important;
+    }
+    [data-testid="stSidebar"] {
+        background-color: #030043 !important;
+    }
+    [data-testid="stBaseButton-secondary"] {
+        background-color: #071277 !important;
+        color: #d69f4c !important;
+        border: 2px solid #000000 !important;
+        font-weight: 900 !important;
+        border-radius: 0px !important;
+        height: auto !important;
+        min-height: 60px !important;
+        width: 100px !important;
+        white-space: normal !important; 
+    }
+    [data-testid="stMarkdownContainer"] p strong {
+    text-transform: uppercase !important;
+    }
+    [data-testid="stBaseButton-secondary"] p {
+    font-size: 1.5rem !important;
+    }
+    </style>
+    """
+)
 
     num_categories = len(categories)
     num_clues = max(len(cat["clues"]) for cat in categories)

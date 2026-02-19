@@ -72,69 +72,71 @@ def generate_lectures_category() -> Dict[str, Any]:
             "Make sure your `.env` file (same folder as this script) defines ASTRO1221_API_KEY."
         )
 
-    # Using a variety of topics to ensure diverse clues
+    # Topics from our lectures - used to search for relevant chunks via RAG
     astronomy_topics = [
-    "variables and data collections",
-    "control flow and file operations",
-    "numerical computing",
-    "functions and object oriented programming",
-    "data visualization",
-    "LLM API basics and parameters",
-    "LLM function tools and RAG retrieval augmented generation",
-    "GitHub and version control",
-    "Streamlit app deployment",
-    "Pandas data analysis",
-]
+        "variables and data collections",
+        "control flow and file operations",
+        "numerical computing",
+        "functions and object oriented programming",
+        "data visualization",
+        "LLM API basics and parameters",
+        "LLM function tools and RAG retrieval augmented generation",
+        "GitHub and version control",
+        "Streamlit app deployment",
+        "Pandas data analysis",
+    ]
     
-    # Retrieve relevant chunks for each topic
+    # Search for the most relevant chunk for each topic and collect them
     all_chunks = []
     for topic in astronomy_topics:
-        results = search_chunks(topic, top_k=1)
-        # Only include chunks with reasonable similarity
+        results = search_chunks(topic, top_k=1)  # Only grab the single best match per topic
+        # Only include chunks that are actually relevant (similarity score >= 0.2)
         if results and results[0]['similarity'] >= 0.2:
             all_chunks.append(results[0]['chunk']['text'])
     
-    # If we didn't find enough content, try some fallback queries
+    # If RAG didn't find enough content, try broader fallback search terms
     if len(all_chunks) < 3:
-        fallback_topics = ["astronomy", "coding", "LLM","data science"]
+        fallback_topics = ["astronomy", "coding", "LLM", "data science"]
         for topic in fallback_topics:
-            if len(all_chunks) >= 5:
+            if len(all_chunks) >= 5:  # Stop once we have enough chunks
                 break
             results = search_chunks(topic, top_k=1)
             if results and results[0]['similarity'] >= 0.2:
                 chunk_text = results[0]['chunk']['text']
-                # Avoid duplicates
-                if chunk_text not in all_chunks:
+                if chunk_text not in all_chunks:  # Avoid adding duplicate chunks
                     all_chunks.append(chunk_text)
     
-    # Combine chunks into context (limit total length)
+    # Build the context string from collected chunks, respecting a total length limit
     context_parts = []
     total_length = 0
-    max_context_length = 3000  # Limit context to avoid token limits
+    max_context_length = 3000  # Cap context size to avoid exceeding LLM token limits
     
-    for chunk in all_chunks[:5]:  # Use up to 5 chunks
-        chunk_text = chunk[:800]  # Limit each chunk to 800 chars
-        # Try to end at a complete sentence
+    for chunk in all_chunks[:5]:  # Use at most 5 chunks regardless of how many we found
+        chunk_text = chunk[:800]  # Truncate each chunk to 800 chars to save space
+        
+        # Find the last complete sentence so we don't cut off mid-sentence
         last_sentence_end = max(
             chunk_text.rfind('.'),
             chunk_text.rfind('?'),
             chunk_text.rfind('!')
         )
         if last_sentence_end > 0:
-            chunk_text = chunk_text[:last_sentence_end + 1]
+            chunk_text = chunk_text[:last_sentence_end + 1]  # Trim to last complete sentence
         
+        # Stop adding chunks if we'd exceed our total context length limit
         if total_length + len(chunk_text) > max_context_length:
             break
         context_parts.append(chunk_text)
         total_length += len(chunk_text)
     
+    # Join all chunks with a separator so the LLM knows where one section ends and another begins
     context = "\n\n---\n\n".join(context_parts)
     
-    # If no context found, use a generic prompt
+    # Fall back to a generic description if no relevant lecture content was found
     if not context:
         context = "General astronomy topics from the course lectures."
     
-    # Generate clues using LLM with retrieved lecture content
+    # System prompt tells the LLM its role and defines the exact JSON format we expect back
     system_prompt = (
         "You are generating Jeopardy-style questions based on course lecture materials. "
         "Create questions that test understanding of the specific content from the lectures. "
@@ -154,6 +156,7 @@ def generate_lectures_category() -> Dict[str, Any]:
         "- Ensure answers are specific facts from the lecture materials."
     )
     
+    # User prompt provides the actual lecture content for the LLM to base questions on
     user_prompt = f"""Generate 5 Jeopardy-style clues based on the following course lecture materials:
 
 LECTURE MATERIALS:
@@ -161,6 +164,7 @@ LECTURE MATERIALS:
 
 Create clues that test knowledge of the specific concepts, facts, and terminology from these lectures."""
 
+    # Call the LLM via LiteLLM with json_object mode to guarantee valid JSON back
     resp = litellm.completion(
         model="openai/GPT-4.1-mini",
         messages=[
@@ -169,31 +173,36 @@ Create clues that test knowledge of the specific concepts, facts, and terminolog
         ],
         api_base=CUSTOM_API_BASE,
         api_key=astro1221_key,
-        temperature=0.7,
-        response_format={"type": "json_object"},
+        temperature=1,  # Slightly creative but still mostly factual
+        response_format={"type": "json_object"},  # Forces the LLM to return valid JSON
     )
     
-    raw_content = resp.choices[0].message["content"]  # type: ignore[index]
+    # Extract the text content from the response (handles both string and list formats)
+    raw_content = resp.choices[0].message["content"]
     if isinstance(raw_content, list):
+        # Some models return content as a list of parts - join them into a single string
         raw_content = "".join(part.get("text", "") for part in raw_content if isinstance(part, dict))
     
+    # Parse the JSON string into a Python dictionary
     try:
         clues_data = json.loads(raw_content)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise ValueError(f"Failed to parse JSON from LLM for Lectures category: {exc}") from exc
     
-    # Validate and structure the response
+    # Extract the clues list and validate we got exactly 5
     clues = clues_data.get("clues", [])
     if not isinstance(clues, list) or len(clues) != 5:
         raise ValueError(f"Expected 5 clues, got {len(clues) if isinstance(clues, list) else 'non-list'}")
     
-    # Ensure values are correct
+    # Overwrite the values the LLM returned to guarantee they're exactly 200-1000
+    # (LLM might return wrong values despite being told, so we enforce them here)
     expected_values = [200, 400, 600, 800, 1000]
     for i, clue in enumerate(clues):
         if not isinstance(clue, dict):
             raise ValueError(f"Clue {i} is not a dictionary")
         clue["value"] = expected_values[i]
     
+    # Return the completed category in the format the game board expects
     return {
         "name": "Lectures",
         "clues": clues
@@ -256,7 +265,7 @@ def generate_game_data() -> GameData:
         ],
         api_base=CUSTOM_API_BASE,
         api_key=astro1221_key,
-        temperature=0.7, # I dont think that changing this value affects much because of the system prompt.
+        temperature=1, # I dont think that changing this value affects much because of the system prompt.
         response_format={"type": "json_object"},
     )
 
