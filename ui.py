@@ -23,10 +23,10 @@ def render_board() -> None:
         color: #d69f4c !important;
         border: 2px solid #000000 !important;
         font-weight: 900 !important;
-        border-radius: 0px !important;
         height: auto !important;
         min-height: 60px !important;
-        width: 100px !important;
+        width: auto !important;
+        min-width: 100px
         white-space: normal !important; 
     }
     [data-testid="stMarkdownContainer"] p strong {
@@ -92,7 +92,7 @@ def render_current_clue() -> None:
     with cols[0]:
         submitted = st.button("Submit answer") #This as you would expect submits your answer
     with cols[1]:
-        give_up = st.button("Show answer / Skip") # This will show you the answer, wait 2 seconds, then go back to the main board. Plan on changing this to "Hint" which will turn this into mutliple choice question
+        give_up = st.button("Show answer") # This will show you the answer, wait 2 seconds, then go back to the main board. Plan on changing this to "Hint" which will turn this into mutliple choice question
     with cols[2]:
         close = st.button("Close") # This will close the question and not give you any points. We should change this to "Give Up"
 

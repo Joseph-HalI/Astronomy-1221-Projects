@@ -170,7 +170,7 @@ Please provide a comprehensive answer based specifically on what the course mate
     response = litellm.completion(
     model="openai/GPT-4.1-mini", 
     max_tokens=400,
-    temperature=0.0,
+    temperature=1,
         messages=[{"role": "user", "content": augmented_prompt}],
         api_base="https://litellmproxy.osu-ai.org",
         api_key=os.getenv("ASTRO1221_API_KEY")

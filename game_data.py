@@ -86,25 +86,41 @@ def generate_lectures_category() -> Dict[str, Any]:
         "Pandas data analysis",
     ]
     
-    # Search for the most relevant chunk for each topic and collect them
+    # Shuffle topics and pick a random subset so each game sees different material
+    shuffled_topics = random.sample(astronomy_topics, min(6, len(astronomy_topics)))
+    
+    # Search for relevant chunks - use top_k > 1 then randomly pick to add retrieval randomness
     all_chunks = []
-    for topic in astronomy_topics:
-        results = search_chunks(topic, top_k=1)  # Only grab the single best match per topic
+    seen_chunk_ids = set()  # Avoid duplicate chunks from overlapping topic matches
+    for topic in shuffled_topics:
+        results = search_chunks(topic, top_k=3)  # Get top 3 matches, then pick randomly
         # Only include chunks that are actually relevant (similarity score >= 0.2)
-        if results and results[0]['similarity'] >= 0.2:
-            all_chunks.append(results[0]['chunk']['text'])
+        valid = [r for r in results if r['similarity'] >= 0.2]
+        if valid:
+            # Randomly choose among the top matches (not always the best) for variety
+            chosen = random.choice(valid)
+            chunk = chosen['chunk']
+            chunk_id = chunk.get('chunk_id', id(chunk))
+            if chunk_id not in seen_chunk_ids:
+                seen_chunk_ids.add(chunk_id)
+                all_chunks.append(chunk['text'])
     
     # If RAG didn't find enough content, try broader fallback search terms
     if len(all_chunks) < 3:
         fallback_topics = ["astronomy", "coding", "LLM", "data science"]
+        random.shuffle(fallback_topics)
         for topic in fallback_topics:
             if len(all_chunks) >= 5:  # Stop once we have enough chunks
                 break
-            results = search_chunks(topic, top_k=1)
-            if results and results[0]['similarity'] >= 0.2:
-                chunk_text = results[0]['chunk']['text']
-                if chunk_text not in all_chunks:  # Avoid adding duplicate chunks
-                    all_chunks.append(chunk_text)
+            results = search_chunks(topic, top_k=3)
+            valid = [r for r in results if r['similarity'] >= 0.2]
+            if valid:
+                chosen = random.choice(valid)
+                chunk = chosen['chunk']
+                chunk_id = chunk.get('chunk_id', id(chunk))
+                if chunk_id not in seen_chunk_ids:
+                    seen_chunk_ids.add(chunk_id)
+                    all_chunks.append(chunk['text'])
     
     # Build the context string from collected chunks, respecting a total length limit
     context_parts = []
@@ -129,6 +145,9 @@ def generate_lectures_category() -> Dict[str, Any]:
         context_parts.append(chunk_text)
         total_length += len(chunk_text)
     
+    # Shuffle chunk order so the LLM sees material in different arrangements each game
+    random.shuffle(context_parts)
+    
     # Join all chunks with a separator so the LLM knows where one section ends and another begins
     context = "\n\n---\n\n".join(context_parts)
     
@@ -140,6 +159,7 @@ def generate_lectures_category() -> Dict[str, Any]:
     system_prompt = (
         "You are generating Jeopardy-style questions based on course lecture materials. "
         "Create questions that test understanding of the specific content from the lectures. "
+        "Each time you are called, pick different concepts and facts to quiz on—avoid reusing the same or very similar clues."
         "Return ONLY a JSON object with this structure:\n"
         '{\"clues\": [\n'
         '  {\"value\": 200, \"clue\": \"text\", \"answer\": \"text\"},\n'
@@ -156,13 +176,16 @@ def generate_lectures_category() -> Dict[str, Any]:
         "- Ensure answers are specific facts from the lecture materials."
     )
     
+    # Add run_id to reduce proxy caching and prompt the model to vary output
+    run_id = random.randint(0, 1_000_000_000)
+    
     # User prompt provides the actual lecture content for the LLM to base questions on
     user_prompt = f"""Generate 5 Jeopardy-style clues based on the following course lecture materials:
 
 LECTURE MATERIALS:
 {context}
 
-Create clues that test knowledge of the specific concepts, facts, and terminology from these lectures."""
+Create clues that test knowledge of the specific concepts, facts, and terminology from these lectures. Vary which facts and concepts you quiz on—do not always focus on the same material. run_id={run_id}"""
 
     # Call the LLM via LiteLLM with json_object mode to guarantee valid JSON back
     resp = litellm.completion(
