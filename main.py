@@ -24,17 +24,48 @@ def main() -> None:
     init_session_state()
 
     st.sidebar.header("Game Controls")
+
+    # Player selection — defaults to 1 (singleplayer) if nothing is chosen
+    num_players = st.sidebar.selectbox(
+        "Number of teams:",
+        options=[1, 2, 3, 4],
+        index=st.session_state.num_players - 1,
+        format_func=lambda x: "1 (Single player)" if x == 1 else f"{x} Teams",
+    )
+
     if st.sidebar.button("New Game"):
         with st.spinner("Generating a new astronomy Jeopardy board..."):
             try:
                 st.session_state.game_board = generate_game_data()
                 st.session_state.answered_questions = set()
-                st.session_state.score = 0
+                st.session_state.num_players = num_players
+                st.session_state.scores = [0] * num_players
+                st.session_state.current_player = 0
                 st.session_state.current_clue = None
             except Exception as exc:
                 st.error(f"Failed to generate game data: {exc}")
 
-    st.sidebar.markdown(f"**Score:** ${st.session_state.score}")
+    # Show scores in sidebar with green indicator for current player
+    if st.session_state.num_players == 1:
+        st.sidebar.markdown(f"**Score:** ${st.session_state.scores[0]}")
+    else:
+        st.sidebar.markdown("**Scores:**")
+        st.sidebar.html("""
+        <style>
+        .team-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; color: white; font-size: 0.95rem; }
+        .team-indicator { width: 6px; height: 22px; border-radius: 3px; flex-shrink: 0; }
+        .team-indicator.active { background-color: #22c55e; }
+        .team-indicator.inactive { background-color: transparent; }
+        </style>
+        """)
+        for i, score in enumerate(st.session_state.scores):
+            active = "active" if i == st.session_state.current_player else "inactive"
+            st.sidebar.html(f"""
+            <div class="team-row">
+                <div class="team-indicator {active}"></div>
+                <span>Team {i + 1}: ${score}</span>
+            </div>
+            """)
 
     usage = st.session_state.last_token_usage
     if usage:

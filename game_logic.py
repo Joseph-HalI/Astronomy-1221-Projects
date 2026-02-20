@@ -25,6 +25,21 @@ def init_session_state() -> None:
         st.session_state.last_token_usage = None
     if "show_hints" not in st.session_state:
         st.session_state.show_hints = False
+    # Multiplayer state
+    if "num_players" not in st.session_state:
+        st.session_state.num_players = 1
+    if "scores" not in st.session_state:
+        st.session_state.scores = [0]
+    if "current_player" not in st.session_state:
+        st.session_state.current_player = 0
+
+
+def advance_player() -> None:
+    """Rotate to the next player/team."""
+    if st.session_state.num_players > 1:
+        st.session_state.current_player = (
+            st.session_state.current_player + 1
+        ) % st.session_state.num_players
 
 
 def mark_answered(cat_idx: int, clue_idx: int) -> None:

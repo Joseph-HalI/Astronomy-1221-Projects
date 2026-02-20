@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 
 import streamlit as st
 
-from game_logic import check_answer, generate_distractors, is_answered, mark_answered, set_current_clue
+from game_logic import advance_player, check_answer, generate_distractors, is_answered, mark_answered, set_current_clue
 
 
 def inject_global_styles() -> None:
@@ -155,26 +155,29 @@ def render_current_clue() -> None:
         cat_idx = current["category_index"]
         clue_idx = current["clue_index"]
         value = current["value"]
+        num_players = st.session_state.get("num_players", 1)
+        current_player = st.session_state.get("current_player", 0)
 
         if check_answer(user_answer, correct_answer):
-            st.success(f"Correct! You earn ${value}.")
-            st.session_state.score += value
+            team_label = f"Team {current_player + 1}" if num_players > 1 else "You"
+            verb = "earned" if num_players > 1 else "earned"
+            st.success(f"Correct! {team_label} earned ${value}.")
+            st.session_state.scores[current_player] += value
         else:
             st.error(f"Not quite. The correct answer was: {correct_answer}")
-            st.session_state.score -= value
+            st.session_state.scores[current_player] -= value
 
         mark_answered(cat_idx, clue_idx)
         st.session_state.current_clue = None
         st.session_state.show_hints = False
+        advance_player()
         time.sleep(2)
         st.rerun()
 
     elif hint:
-        # Generate distractors now, only when the player actually asks for a hint
         with st.spinner("Generating hints..."):
             distractors = generate_distractors(current["clue"], current["answer"])
 
-        # Fallback to random board answers if LLM failed
         if len(distractors) < 3:
             categories: List[Dict[str, Any]] = st.session_state.game_board["categories"]
             other_answers = []
@@ -199,5 +202,6 @@ def render_current_clue() -> None:
         mark_answered(current["category_index"], current["clue_index"])
         st.session_state.current_clue = None
         st.session_state.show_hints = False
+        advance_player()
         time.sleep(2)
         st.rerun()
