@@ -5,12 +5,14 @@ from dotenv import load_dotenv
 
 from game_data import generate_game_data
 from game_logic import init_session_state
-from ui import render_board, render_current_clue
+from ui import inject_global_styles, render_board, render_current_clue
 
 
 def main() -> None:
-    # This loads the .env file so you can get the API key without leaking it to github.
     load_dotenv()
+
+    # Apply the Jeopardy theme immediately so every state looks consistent
+    inject_global_styles()
 
     if not os.getenv("ASTRO1221_API_KEY"):
         st.warning(
@@ -52,7 +54,6 @@ def main() -> None:
         st.info("Click **New Game** in the sidebar to generate an astronomy Jeopardy board.")
         return
 
-    # Show EITHER the clue view OR the board — never both at once
     if st.session_state.current_clue is not None:
         render_current_clue()
     else:

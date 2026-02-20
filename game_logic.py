@@ -1,10 +1,15 @@
 import difflib
+import json
+import os
 import random
 from typing import Any, Dict, List
 
+import litellm
 import streamlit as st
 
-# This saves your progress so that why you can actually play the jeopardy game.
+from config import CUSTOM_API_BASE
+
+
 def init_session_state() -> None:
     if "game_board" not in st.session_state:
         st.session_state.game_board = None
@@ -18,34 +23,66 @@ def init_session_state() -> None:
         st.session_state.answer_input = ""
     if "last_token_usage" not in st.session_state:
         st.session_state.last_token_usage = None
+    if "show_hints" not in st.session_state:
+        st.session_state.show_hints = False
 
-# Marks a question as answered by adding it into the answered questions session state
+
 def mark_answered(cat_idx: int, clue_idx: int) -> None:
     st.session_state.answered_questions.add((cat_idx, clue_idx))
 
-# This displays which questions you have answered so you can't try to answer repeat questions
+
 def is_answered(cat_idx: int, clue_idx: int) -> bool:
     return (cat_idx, clue_idx) in st.session_state.answered_questions
 
 
+def generate_distractors(clue: str, correct_answer: str) -> List[str]:
+    """
+    Ask the LLM to generate 3 plausible but incorrect answers for this clue.
+    Called only when the player actually presses the Hint button.
+    Falls back to random board answers if the LLM call fails.
+    """
+    astro1221_key = os.getenv("ASTRO1221_API_KEY")
+    if not astro1221_key:
+        return []
+
+    prompt = (
+        f"You are helping generate wrong answer choices for a Jeopardy-style game.\n\n"
+        f"Clue: {clue}\n"
+        f"Correct answer: {correct_answer}\n\n"
+        f"Generate exactly 3 plausible but incorrect answers that:\n"
+        f"- Are in the same subject area as the correct answer\n"
+        f"- Could believably fool someone who doesn't know the topic well\n"
+        f"- Are clearly wrong to someone who does know the topic\n"
+        f"- Are similar in format and length to the correct answer\n\n"
+        f"Return ONLY a JSON object like this: {{\"distractors\": [\"answer1\", \"answer2\", \"answer3\"]}}"
+    )
+
+    try:
+        resp = litellm.completion(
+            model="openai/GPT-4.1-mini",
+            messages=[{"role": "user", "content": prompt}],
+            api_base=CUSTOM_API_BASE,
+            api_key=astro1221_key,
+            temperature=0.9,
+            response_format={"type": "json_object"},
+        )
+        raw = resp.choices[0].message["content"]
+        if isinstance(raw, list):
+            raw = "".join(part.get("text", "") for part in raw if isinstance(part, dict))
+        data = json.loads(raw)
+        distractors = data.get("distractors", [])
+        if isinstance(distractors, list) and len(distractors) == 3:
+            return [str(d) for d in distractors]
+    except Exception:
+        pass
+
+    return []
+
+
 def set_current_clue(cat_idx: int, clue_idx: int) -> None:
+    """Sets the active clue instantly — no LLM call here."""
     categories: List[Dict[str, Any]] = st.session_state.game_board["categories"]
     clue = categories[cat_idx]["clues"][clue_idx]
-
-    # Build multiple-choice options: correct answer + up to 3 random answers
-    # from other clues on the board.
-    other_answers: List[str] = []
-    for ci, cat in enumerate(categories):
-        for qi, c in enumerate(cat["clues"]):
-            if ci == cat_idx and qi == clue_idx:
-                continue
-            ans = c.get("answer")
-            if isinstance(ans, str) and ans.strip():
-                other_answers.append(ans)
-
-    distractors = random.sample(other_answers, k=min(3, len(other_answers))) if other_answers else []
-    options = distractors + [clue["answer"]]
-    random.shuffle(options)
 
     st.session_state.current_clue = {
         "category_index": cat_idx,
@@ -54,20 +91,15 @@ def set_current_clue(cat_idx: int, clue_idx: int) -> None:
         "value": clue["value"],
         "clue": clue["clue"],
         "answer": clue["answer"],
-        "options": options,
+        "options": [],  # Populated lazily when the player presses Hint
     }
     st.session_state.answer_input = ""
+    st.session_state.show_hints = False
 
 
 def _normalize_answer(text: str) -> str:
-    """
-    Normalize answers so that Jeopardy-style phrases like
-    'what is mars' or 'What is Mars?' become just 'mars'.
-    This lets users simply type 'mars' and be marked correct.
-    """
     t = text.strip().lower()
 
-    # Strip common Jeopardy-style prefixes
     prefixes = [
         "what is ", "what's ", "whats ",
         "who is ", "who's ", "whos ",
@@ -75,21 +107,19 @@ def _normalize_answer(text: str) -> str:
     ]
     for p in prefixes:
         if t.startswith(p):
-            t = t[len(p) :]
+            t = t[len(p):]
             break
 
-    # Remove leading articles
     articles = ("the ", "a ", "an ")
     for a in articles:
         if t.startswith(a):
-            t = t[len(a) :]
+            t = t[len(a):]
             break
 
-    # Strip punctuation at the ends
     t = t.strip(" .!?\"'")
     return t
 
-# as the name suggests, when this function is called, it checks if the answer is correct.
+
 def check_answer(user_answer: str, correct_answer: str) -> bool:
     user = _normalize_answer(user_answer)
     correct = _normalize_answer(correct_answer)
@@ -97,6 +127,5 @@ def check_answer(user_answer: str, correct_answer: str) -> bool:
     if not user:
         return False
 
-    # Simple forgiving comparison using difflib
     matches = difflib.get_close_matches(user, [correct], n=1, cutoff=0.7)
     return bool(matches)

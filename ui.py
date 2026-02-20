@@ -1,9 +1,10 @@
+import random
 import time
 from typing import Any, Dict, List
 
 import streamlit as st
 
-from game_logic import check_answer, is_answered, mark_answered, set_current_clue
+from game_logic import check_answer, generate_distractors, is_answered, mark_answered, set_current_clue
 
 
 def inject_global_styles() -> None:
@@ -18,6 +19,21 @@ def inject_global_styles() -> None:
     }
     [data-testid="stMarkdownContainer"] p strong {
         text-transform: uppercase !important;
+    }
+    /* Sidebar button: always themed, fixed size regardless of which view is active */
+    [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] {
+        background-color: #071277 !important;
+        color: #d69f4c !important;
+        border: 2px solid #000000 !important;
+        font-weight: 900 !important;
+        border-radius: 8px !important;
+        width: auto !important;
+        min-height: 40px !important;
+        height: auto !important;
+        white-space: nowrap !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] p {
+        font-size: 1rem !important;
     }
     </style>
     """)
@@ -85,7 +101,6 @@ def render_current_clue() -> None:
 
     inject_global_styles()
 
-    # Clue-view button styles — natural sizing and rounded corners
     st.html("""
     <style>
     [data-testid="stBaseButton-secondary"] {
@@ -115,7 +130,6 @@ def render_current_clue() -> None:
     st.markdown(f"**Value:** ${current['value']}")
     st.write(current["clue"])
 
-    # --- Answer input: free-response by default, multiple choice after hint ---
     show_hints: bool = st.session_state.get("show_hints", False)
 
     if not show_hints:
@@ -156,6 +170,26 @@ def render_current_clue() -> None:
         st.rerun()
 
     elif hint:
+        # Generate distractors now, only when the player actually asks for a hint
+        with st.spinner("Generating hints..."):
+            distractors = generate_distractors(current["clue"], current["answer"])
+
+        # Fallback to random board answers if LLM failed
+        if len(distractors) < 3:
+            categories: List[Dict[str, Any]] = st.session_state.game_board["categories"]
+            other_answers = []
+            for ci, cat in enumerate(categories):
+                for qi, c in enumerate(cat["clues"]):
+                    if ci == current["category_index"] and qi == current["clue_index"]:
+                        continue
+                    ans = c.get("answer")
+                    if isinstance(ans, str) and ans.strip():
+                        other_answers.append(ans)
+            distractors = random.sample(other_answers, k=min(3, len(other_answers)))
+
+        options = distractors + [current["answer"]]
+        random.shuffle(options)
+        st.session_state.current_clue["options"] = options
         st.session_state.show_hints = True
         st.rerun()
 
