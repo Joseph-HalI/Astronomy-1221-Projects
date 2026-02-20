@@ -135,7 +135,6 @@ def render_current_clue() -> None:
     if not show_hints:
         user_answer = st.text_input("Your answer:", key="answer_input")
     else:
-        st.caption("💡 Hint: choose an option below.")
         options: List[str] = current.get("options", [current["answer"]])
         user_answer = st.radio("Choose your answer:", options, key="answer_radio")
 

@@ -135,6 +135,42 @@ def _normalize_answer(text: str) -> str:
     return t
 
 
+# Known synonyms — if the user's answer or the correct answer matches any entry
+# in a group, they're treated as equivalent.
+SYNONYMS = [
+    {"aurora borealis", "northern lights"},
+    {"aurora australis", "southern lights"},
+    {"aurora", "aurora borealis", "northern lights"},
+    {"sol", "sun"},
+    {"terra", "earth"},
+    {"luna", "moon"},
+    {"h2o", "water"},
+    {"electromagnetic radiation", "light"},
+    {"hubble", "hubble space telescope"},
+    {"iss", "international space station"},
+    {"milky way", "milky way galaxy"},
+    {"cme", "coronal mass ejection"},
+    {"hr diagram", "hertzsprung russell diagram", "hertzsprung-russell diagram"},
+    {"tidal locking", "synchronous rotation"},
+    {"shooting star", "meteor"},
+    {"falling star", "meteor"},
+    {"git pull", "pull"},
+    {"git push", "push"},
+    {"git commit", "commit"},
+    {"llm", "large language model"},
+    {"api", "application programming interface"},
+    {"rag", "retrieval augmented generation"},
+]
+
+
+def _synonyms_match(a: str, b: str) -> bool:
+    """Return True if a and b appear together in any synonym group."""
+    for group in SYNONYMS:
+        if a in group and b in group:
+            return True
+    return False
+
+
 def check_answer(user_answer: str, correct_answer: str) -> bool:
     user = _normalize_answer(user_answer)
     correct = _normalize_answer(correct_answer)
@@ -142,5 +178,39 @@ def check_answer(user_answer: str, correct_answer: str) -> bool:
     if not user:
         return False
 
-    matches = difflib.get_close_matches(user, [correct], n=1, cutoff=0.7)
+    # Exact match after normalization
+    if user == correct:
+        return True
+
+    # Synonym match
+    if _synonyms_match(user, correct):
+        return True
+
+    # Token-based checks: split into individual words
+    user_tokens = set(user.split())
+    correct_tokens = set(correct.split())
+
+    # If every word the user typed appears in the correct answer, accept it
+    # e.g. "schema" matches "function schemas" won't work directly but
+    # we also check if any user token is a substring of any correct token
+    # e.g. "schema" is a substring of "schemas"
+    def tokens_match(user_toks, correct_toks):
+        for ut in user_toks:
+            if not any(ut in ct or ct in ut for ct in correct_toks):
+                return False
+        return True
+
+    if tokens_match(user_tokens, correct_tokens):
+        return True
+
+    # If the correct answer contains multiple words, also check if the user
+    # answer matches any single key word in the correct answer closely
+    for correct_token in correct_tokens:
+        if len(correct_token) > 3:  # Skip short/common words
+            matches = difflib.get_close_matches(user, [correct_token], n=1, cutoff=0.8)
+            if matches:
+                return True
+
+    # Fallback: fuzzy match the full strings
+    matches = difflib.get_close_matches(user, [correct], n=1, cutoff=0.6)
     return bool(matches)

@@ -11,7 +11,6 @@ from rag_lectures import search_chunks
 
 # This makes sure that the data we get is what we expect.
 def validate_game_data(data: Any) -> GameData:
-    # Anything inside triple quotations is just an explaination to the LLM what the function should be doing.
     """
     Strictly validate that data matches the expected schema:
 
@@ -28,7 +27,6 @@ def validate_game_data(data: Any) -> GameData:
         ]
     }
     """
-    # This is just making sure we're generating everything properly. if not, it'll will break things and sends out an error.
     if not isinstance(data, dict):
         raise ValueError("Game data must be a JSON object.")
 
@@ -91,13 +89,11 @@ def generate_lectures_category() -> Dict[str, Any]:
     
     # Search for relevant chunks - use top_k > 1 then randomly pick to add retrieval randomness
     all_chunks = []
-    seen_chunk_ids = set()  # Avoid duplicate chunks from overlapping topic matches
+    seen_chunk_ids = set()
     for topic in shuffled_topics:
-        results = search_chunks(topic, top_k=3)  # Get top 3 matches, then pick randomly
-        # Only include chunks that are actually relevant (similarity score >= 0.2)
+        results = search_chunks(topic, top_k=3)
         valid = [r for r in results if r['similarity'] >= 0.2]
         if valid:
-            # Randomly choose among the top matches (not always the best) for variety
             chosen = random.choice(valid)
             chunk = chosen['chunk']
             chunk_id = chunk.get('chunk_id', id(chunk))
@@ -110,7 +106,7 @@ def generate_lectures_category() -> Dict[str, Any]:
         fallback_topics = ["astronomy", "coding", "LLM", "data science"]
         random.shuffle(fallback_topics)
         for topic in fallback_topics:
-            if len(all_chunks) >= 5:  # Stop once we have enough chunks
+            if len(all_chunks) >= 5:
                 break
             results = search_chunks(topic, top_k=3)
             valid = [r for r in results if r['similarity'] >= 0.2]
@@ -125,41 +121,39 @@ def generate_lectures_category() -> Dict[str, Any]:
     # Build the context string from collected chunks, respecting a total length limit
     context_parts = []
     total_length = 0
-    max_context_length = 3000  # Cap context size to avoid exceeding LLM token limits
+    max_context_length = 3000
     
-    for chunk in all_chunks[:5]:  # Use at most 5 chunks regardless of how many we found
-        chunk_text = chunk[:800]  # Truncate each chunk to 800 chars to save space
+    for chunk in all_chunks[:5]:
+        chunk_text = chunk[:800]
         
-        # Find the last complete sentence so we don't cut off mid-sentence
         last_sentence_end = max(
             chunk_text.rfind('.'),
             chunk_text.rfind('?'),
             chunk_text.rfind('!')
         )
         if last_sentence_end > 0:
-            chunk_text = chunk_text[:last_sentence_end + 1]  # Trim to last complete sentence
+            chunk_text = chunk_text[:last_sentence_end + 1]
         
-        # Stop adding chunks if we'd exceed our total context length limit
         if total_length + len(chunk_text) > max_context_length:
             break
         context_parts.append(chunk_text)
         total_length += len(chunk_text)
     
-    # Shuffle chunk order so the LLM sees material in different arrangements each game
     random.shuffle(context_parts)
-    
-    # Join all chunks with a separator so the LLM knows where one section ends and another begins
     context = "\n\n---\n\n".join(context_parts)
     
-    # Fall back to a generic description if no relevant lecture content was found
     if not context:
         context = "General astronomy topics from the course lectures."
     
-    # System prompt tells the LLM its role and defines the exact JSON format we expect back
+    # ---- UPDATED system prompt: enforces short, Jeopardy-style answers ----
     system_prompt = (
         "You are generating Jeopardy-style questions based on course lecture materials. "
-        "Create questions that test understanding of the specific content from the lectures. "
-        "Each time you are called, pick different concepts and facts to quiz on—avoid reusing the same or very similar clues."
+        "In Jeopardy, the CLUE is a description or hint, and the ANSWER is a short, specific term, name, or phrase. "
+        "Answers must be 1-5 words maximum — never a full sentence or explanation. "
+        "The clue should describe or define the answer, not ask an open-ended question like 'Why is X important?'. "
+        "Each time you are called, pick different concepts and facts to quiz on — avoid reusing similar clues.\n\n"
+        "Good example: {\"clue\": \"This Git command syncs your local repo with the latest remote changes\", \"answer\": \"git pull\"}\n"
+        "Bad example: {\"clue\": \"Why is pulling important before starting work?\", \"answer\": \"Because you may have worked on multiple computers...\"}\n\n"
         "Return ONLY a JSON object with this structure:\n"
         '{\"clues\": [\n'
         '  {\"value\": 200, \"clue\": \"text\", \"answer\": \"text\"},\n'
@@ -172,22 +166,20 @@ def generate_lectures_category() -> Dict[str, Any]:
         "- Generate exactly 5 clues with values 200, 400, 600, 800, 1000.\n"
         "- Base clues on the provided lecture content.\n"
         "- Use increasing difficulty: 200=easiest, 1000=hardest.\n"
-        "- Do NOT include any explanation outside the JSON.\n"
-        "- Ensure answers are specific facts from the lecture materials."
+        "- Answers must be a specific term, name, or short phrase (5 words max) — never a sentence.\n"
+        "- Clues must describe or define the answer, not ask open-ended questions.\n"
+        "- Do NOT include any explanation outside the JSON."
     )
     
-    # Add run_id to reduce proxy caching and prompt the model to vary output
     run_id = random.randint(0, 1_000_000_000)
     
-    # User prompt provides the actual lecture content for the LLM to base questions on
     user_prompt = f"""Generate 5 Jeopardy-style clues based on the following course lecture materials:
 
 LECTURE MATERIALS:
 {context}
 
-Create clues that test knowledge of the specific concepts, facts, and terminology from these lectures. Vary which facts and concepts you quiz on—do not always focus on the same material. run_id={run_id}"""
+Remember: clues describe the answer, answers are short terms or phrases (5 words max). Vary which facts and concepts you quiz on. run_id={run_id}"""
 
-    # Call the LLM via LiteLLM with json_object mode to guarantee valid JSON back
     resp = litellm.completion(
         model="openai/GPT-4.1-mini",
         messages=[
@@ -196,36 +188,29 @@ Create clues that test knowledge of the specific concepts, facts, and terminolog
         ],
         api_base=CUSTOM_API_BASE,
         api_key=astro1221_key,
-        temperature=1,  # Slightly creative but still mostly factual
-        response_format={"type": "json_object"},  # Forces the LLM to return valid JSON
+        temperature=1,
+        response_format={"type": "json_object"},
     )
     
-    # Extract the text content from the response (handles both string and list formats)
     raw_content = resp.choices[0].message["content"]
     if isinstance(raw_content, list):
-        # Some models return content as a list of parts - join them into a single string
         raw_content = "".join(part.get("text", "") for part in raw_content if isinstance(part, dict))
     
-    # Parse the JSON string into a Python dictionary
     try:
         clues_data = json.loads(raw_content)
     except Exception as exc:
         raise ValueError(f"Failed to parse JSON from LLM for Lectures category: {exc}") from exc
     
-    # Extract the clues list and validate we got exactly 5
     clues = clues_data.get("clues", [])
     if not isinstance(clues, list) or len(clues) != 5:
         raise ValueError(f"Expected 5 clues, got {len(clues) if isinstance(clues, list) else 'non-list'}")
     
-    # Overwrite the values the LLM returned to guarantee they're exactly 200-1000
-    # (LLM might return wrong values despite being told, so we enforce them here)
     expected_values = [200, 400, 600, 800, 1000]
     for i, clue in enumerate(clues):
         if not isinstance(clue, dict):
             raise ValueError(f"Clue {i} is not a dictionary")
         clue["value"] = expected_values[i]
     
-    # Return the completed category in the format the game board expects
     return {
         "name": "Lectures",
         "clues": clues
@@ -237,7 +222,6 @@ def generate_game_data() -> GameData:
     Call an LLM via LiteLLM to generate game data, returning a strictly validated JSON object.
     Uses environment variables for API keys (handled by LiteLLM).
     """
-    # This essentially just tells the API how to behave when generating the jeopardy board.
     system_prompt = (
         "You are generating Jeopardy-style questions for an introductory astronomy class. "
         "Every time you are called, you MUST vary the specific wording of clues and, when reasonable, "
@@ -261,7 +245,6 @@ def generate_game_data() -> GameData:
         "pretend you are sampling from a large bank of possible clues."
     )
 
-    # This calls the API key from the .env file without exposing it to the entire world. If the key isn't there, it will let us know.
     astro1221_key = os.getenv("ASTRO1221_API_KEY")
     if not astro1221_key:
         raise ValueError(
@@ -269,7 +252,6 @@ def generate_game_data() -> GameData:
             "Make sure your `.env` file (same folder as this script) defines ASTRO1221_API_KEY."
         )
 
-    # Add a random run ID to discourage proxy-side caching and encourage variety. Sadly I don't think this actually works
     run_id = random.randint(0, 1_000_000_000)
 
     resp = litellm.completion(
@@ -288,13 +270,12 @@ def generate_game_data() -> GameData:
         ],
         api_base=CUSTOM_API_BASE,
         api_key=astro1221_key,
-        temperature=1, # I dont think that changing this value affects much because of the system prompt.
+        temperature=1,
         response_format={"type": "json_object"},
     )
 
     raw_content = resp.choices[0].message["content"]  # type: ignore[index]
     if isinstance(raw_content, list):
-        # Some providers may return a list of content parts
         raw_content = "".join(part.get("text", "") for part in raw_content if isinstance(part, dict))
 
     try:
@@ -307,7 +288,6 @@ def generate_game_data() -> GameData:
     if isinstance(resp, dict):
         usage = resp.get("usage")
     if usage is None:
-        # Fallback: approximate tokens from character length of prompt/completion.
         prompt_text = (
             system_prompt
             + " "
@@ -336,5 +316,4 @@ def generate_game_data() -> GameData:
     # Combine the 4 LLM categories with the 1 RAG category
     combined_categories = llm_data["categories"] + [lectures_category]
     
-    # Validate the combined result
     return validate_game_data({"categories": combined_categories})
